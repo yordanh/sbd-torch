@@ -3,18 +3,20 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class VAE(nn.Module):
-    def __init__(self, alpha=1, beta=1, latent_n=1, device="cpu"):
+    def __init__(self, alpha=1, beta=1, latent_n=1, device="cpu", sbd=True):
         super(VAE, self).__init__()
         self.latent_n = latent_n
         self.device = device
+        self.sbd = sbd
         
         self.alpha = alpha
         self.beta = beta
         
-        # IMAGE ENCODER
         self.conv_channels = [32,32,64,64]
         self.dense_channels = [1024, 32]
-    
+        self.sp_conv_channels = [64, 64]
+
+        # IMAGE ENCODER
         kernel_size=3
         self.encoder_conv_0 = nn.Conv2d(3, self.conv_channels[0], kernel_size, padding=1, stride=2) # (32, 32)
         self.encoder_conv_1 = nn.Conv2d(self.conv_channels[0], self.conv_channels[1], kernel_size, padding=1ss, stride=2) # (16, 16)        
@@ -25,6 +27,7 @@ class VAE(nn.Module):
         self.encoder_mu = nn.Linear(self.dense_channels[1], self.latent_n)
         self.encoder_ln_var = nn.Linear(self.dense_channels[1], self.latent_n)
         
+        # IMAGE DECONV DECODER
         kernel_size = 4
         self.decoder_dense_0 = nn.Linear(self.latent_n, self.dense_channels[1])
         self.decoder_dense_1 = nn.Linear(self.dense_channels[1], self.dense_channels[0])
@@ -33,6 +36,20 @@ class VAE(nn.Module):
         self.decoder_conv_1 = nn.ConvTranspose2d(self.conv_channels[1], self.conv_channels[0], kernel_size, stride=2, padding=1)
         self.decoder_output_img = nn.ConvTranspose2d(self.conv_channels[0], 3, kernel_size, stride=2, padding=1)
         
+        # IMAGE SPATIAL DECODER
+        kernel_size = 3
+        self.sp_dec_2 = nn.Conv2d(self.latent_n+2, self.sp_conv_channels[0], kernel_size, padding=1)
+        self.sp_dec_1 = nn.Conv2d(self.sp_conv_channels[0], self.sp_conv_channels[1], kernel_size, padding=1)
+        self.sp_dec_0 = nn.Conv2d(self.sp_conv_channels[1], 3, kernel_size, padding=1)
+        
+        self.image_size = 64
+        a = np.linspace(-1, 1, self.image_size)
+        b = np.linspace(-1, 1, self.image_size)
+        x, y = np.meshgrid(a, b)
+        x = x.reshape(self.image_size, self.image_size, 1)
+        y = y.reshape(self.image_size, self.image_size, 1)
+        self.xy = np.concatenate((x,y), axis=-1)
+
         self.encoder = [self.encoder_conv_0,
                         self.encoder_conv_1,
                         self.encoder_conv_2,
@@ -47,6 +64,10 @@ class VAE(nn.Module):
                         self.decoder_conv_2,
                         self.decoder_conv_1,
                         self.decoder_output_img]
+
+        self.sp_decoder = [self.sp_dec_2,
+                           self.sp_dec_1,
+                           self.sp_dec_0]
         
         self.init_weights()
     
@@ -57,13 +78,15 @@ class VAE(nn.Module):
         for i in range(len(self.decoder)):
             self.decoder[i].weight.data.normal_(0, 0.01)
 
+        for i in range(len(self.sp_decoder)):
+            self.sp_decoder[i].weight.data.normal_(0, 0.01)
+
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5*logvar)
         eps = torch.randn_like(std)
         return mu + eps*std
     
     def encode(self, x):
-        
         conv_0_encoded = F.leaky_relu(self.encoder_conv_0(x))
         conv_1_encoded = F.leaky_relu(self.encoder_conv_1(conv_0_encoded))
         conv_2_encoded = F.leaky_relu(self.encoder_conv_2(conv_1_encoded))
@@ -88,6 +111,21 @@ class VAE(nn.Module):
         out_img = self.decoder_output_img(deconv_1_decoded)
         
         return torch.sigmoid(out_img)
+
+    def sp_decode(self, z):
+        batchsize = len(z)
+        xy_tiled = torch.from_numpy(np.tile(self.xy, (batchsize, 1, 1, 1)).astype(np.float32)).to(self.device)
+        
+        z_tiled = torch.repeat_interleave(z, self.image_size*self.image_size, dim=0).view(batchsize, self.image_size, self.image_size, self.latent_n)
+        
+        z_and_xy = torch.cat((z_tiled, xy_tiled), dim=3)
+        z_and_xy = z_and_xy.permute(0, 3, 2, 1)
+
+        sp_2_decoded = F.leaky_relu(self.sp_dec_2(z_and_xy))
+        sp_1_decoded = F.leaky_relu(self.sp_dec_1(sp_2_decoded))
+        out_img = self.sp_dec_0(sp_1_decoded)
+        
+        return torch.sigmoid(out_img)
     
     def get_latent(self, x):
         mu, logvar, _ = self.encode(x)
@@ -97,14 +135,15 @@ class VAE(nn.Module):
     
     def forward(self, x):
         z, mu, logvar = self.encode(x)    
-        img_out = self.decode(z)
+        if self.sbd:
+            img_out = self.sp_decode(z)
+        else:
+            img_out = self.decode(z)
         
         return img_out, mu, logvar 
     
     def get_loss(self):
-        
         def loss(img_in, img_out, mu, logvar):
-            
             rec = nn.MSELoss(reduction="none")(img_out, img_in)
             rec = torch.mean(torch.sum(rec.view(rec.shape[0], -1), dim=-1))
             
