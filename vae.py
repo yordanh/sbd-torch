@@ -12,35 +12,35 @@ class VAE(nn.Module):
         self.alpha = alpha
         self.beta = beta
         
-        self.conv_channels = [32,32,64,64]
-        self.dense_channels = [1024, 32]
-        self.sp_conv_channels = [64, 64]
+        self.conv_ch = [32,32,64,64]
+        self.dense_ch = [1024, 32]
+        self.sbd_conv_ch = [64, 64]
 
         # IMAGE ENCODER
-        kernel_size=3
-        self.encoder_conv_0 = nn.Conv2d(3, self.conv_channels[0], kernel_size, padding=1, stride=2) # (32, 32)
-        self.encoder_conv_1 = nn.Conv2d(self.conv_channels[0], self.conv_channels[1], kernel_size, padding=1ss, stride=2) # (16, 16)        
-        self.encoder_conv_2 = nn.Conv2d(self.conv_channels[1], self.conv_channels[2], kernel_size, padding=1, stride=2) # (8, 8)
-        self.encoder_conv_3 = nn.Conv2d(self.conv_channels[2], self.conv_channels[3], kernel_size, padding=1, stride=2) # (4, 4)
+        k_size=3
+        self.encoder_conv_0 = nn.Conv2d(3, self.conv_ch[0], k_size, padding=1, stride=2) # (32, 32)
+        self.encoder_conv_1 = nn.Conv2d(self.conv_ch[0], self.conv_ch[1], k_size, padding=1, stride=2) # (16, 16)        
+        self.encoder_conv_2 = nn.Conv2d(self.conv_ch[1], self.conv_ch[2], k_size, padding=1, stride=2) # (8, 8)
+        self.encoder_conv_3 = nn.Conv2d(self.conv_ch[2], self.conv_ch[3], k_size, padding=1, stride=2) # (4, 4)
         
-        self.encoder_dense_0 = nn.Linear(self.dense_channels[0], self.dense_channels[1])
-        self.encoder_mu = nn.Linear(self.dense_channels[1], self.latent_n)
-        self.encoder_ln_var = nn.Linear(self.dense_channels[1], self.latent_n)
+        self.encoder_dense_0 = nn.Linear(self.dense_ch[0], self.dense_ch[1])
+        self.encoder_mu = nn.Linear(self.dense_ch[1], self.latent_n)
+        self.encoder_ln_var = nn.Linear(self.dense_ch[1], self.latent_n)
         
         # IMAGE DECONV DECODER
-        kernel_size = 4
-        self.decoder_dense_0 = nn.Linear(self.latent_n, self.dense_channels[1])
-        self.decoder_dense_1 = nn.Linear(self.dense_channels[1], self.dense_channels[0])
-        self.decoder_conv_3 = nn.ConvTranspose2d(self.conv_channels[3], self.conv_channels[2], kernel_size, stride=2, padding=1)
-        self.decoder_conv_2 = nn.ConvTranspose2d(self.conv_channels[2], self.conv_channels[1], kernel_size, stride=2, padding=1)
-        self.decoder_conv_1 = nn.ConvTranspose2d(self.conv_channels[1], self.conv_channels[0], kernel_size, stride=2, padding=1)
-        self.decoder_output_img = nn.ConvTranspose2d(self.conv_channels[0], 3, kernel_size, stride=2, padding=1)
+        k_size = 4
+        self.deconv_dense_0 = nn.Linear(self.latent_n, self.dense_ch[1])
+        self.deconv_dense_1 = nn.Linear(self.dense_ch[1], self.dense_ch[0])
+        self.deconv_conv_3 = nn.ConvTranspose2d(self.conv_ch[3], self.conv_ch[2], k_size, stride=2, padding=1)
+        self.deconv_conv_2 = nn.ConvTranspose2d(self.conv_ch[2], self.conv_ch[1], k_size, stride=2, padding=1)
+        self.deconv_conv_1 = nn.ConvTranspose2d(self.conv_ch[1], self.conv_ch[0], k_size, stride=2, padding=1)
+        self.deconv_output_img = nn.ConvTranspose2d(self.conv_ch[0], 3, k_size, stride=2, padding=1)
         
         # IMAGE SPATIAL DECODER
-        kernel_size = 3
-        self.sp_dec_2 = nn.Conv2d(self.latent_n+2, self.sp_conv_channels[0], kernel_size, padding=1)
-        self.sp_dec_1 = nn.Conv2d(self.sp_conv_channels[0], self.sp_conv_channels[1], kernel_size, padding=1)
-        self.sp_dec_0 = nn.Conv2d(self.sp_conv_channels[1], 3, kernel_size, padding=1)
+        k_size = 3
+        self.sbd_conv_2 = nn.Conv2d(self.latent_n+2, self.sbd_conv_ch[0], k_size, padding=1)
+        self.sbd_conv_1 = nn.Conv2d(self.sbd_conv_ch[0], self.sbd_conv_ch[1], k_size, padding=1)
+        self.sbd_conv_0 = nn.Conv2d(self.sbd_conv_ch[1], 3, k_size, padding=1)
         
         self.image_size = 64
         a = np.linspace(-1, 1, self.image_size)
@@ -58,16 +58,16 @@ class VAE(nn.Module):
                         self.encoder_mu,
                         self.encoder_ln_var]
         
-        self.decoder = [self.decoder_dense_0,
-                        self.decoder_dense_1,
-                        self.decoder_conv_3,
-                        self.decoder_conv_2,
-                        self.decoder_conv_1,
-                        self.decoder_output_img]
+        self.deconv_decoder = [self.deconv_dense_0,
+                               self.deconv_dense_1,
+                               self.deconv_conv_3,
+                               self.deconv_conv_2,
+                               self.deconv_conv_1,
+                               self.deconv_output_img]
 
-        self.sp_decoder = [self.sp_dec_2,
-                           self.sp_dec_1,
-                           self.sp_dec_0]
+        self.sbd_decoder = [self.sbd_conv_2,
+                            self.sbd_conv_1,
+                            self.sbd_conv_0]
         
         self.init_weights()
     
@@ -75,11 +75,11 @@ class VAE(nn.Module):
         for i in range(len(self.encoder)):
             self.encoder[i].weight.data.normal_(0, 0.01)
             
-        for i in range(len(self.decoder)):
-            self.decoder[i].weight.data.normal_(0, 0.01)
+        for i in range(len(self.deconv_decoder)):
+            self.deconv_decoder[i].weight.data.normal_(0, 0.01)
 
-        for i in range(len(self.sp_decoder)):
-            self.sp_decoder[i].weight.data.normal_(0, 0.01)
+        for i in range(len(self.sbd_decoder)):
+            self.sbd_decoder[i].weight.data.normal_(0, 0.01)
 
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5*logvar)
@@ -101,18 +101,18 @@ class VAE(nn.Module):
         
         return z, mu, logvar
     
-    def decode(self, z):
-        dense_0_decoded = F.leaky_relu(self.decoder_dense_0(z))
-        dense_1_decoded = F.leaky_relu(self.decoder_dense_1(dense_0_decoded))
-        reshaped_decoded = dense_1_decoded.view((len(dense_1_decoded), self.conv_channels[-1], 4, 4))
-        deconv_3_decoded = F.leaky_relu(self.decoder_conv_3(reshaped_decoded))
-        deconv_2_decoded = F.leaky_relu(self.decoder_conv_2(deconv_3_decoded))
-        deconv_1_decoded = F.leaky_relu(self.decoder_conv_1(deconv_2_decoded))
-        out_img = self.decoder_output_img(deconv_1_decoded)
+    def deconv_decode(self, z):
+        dense_0_decoded = F.leaky_relu(self.deconv_dense_0(z))
+        dense_1_decoded = F.leaky_relu(self.deconv_dense_1(dense_0_decoded))
+        reshaped_decoded = dense_1_decoded.view((len(dense_1_decoded), self.conv_ch[-1], 4, 4))
+        deconv_3_decoded = F.leaky_relu(self.deconv_conv_3(reshaped_decoded))
+        deconv_2_decoded = F.leaky_relu(self.deconv_conv_2(deconv_3_decoded))
+        deconv_1_decoded = F.leaky_relu(self.deconv_conv_1(deconv_2_decoded))
+        out_img = self.deconv_output_img(deconv_1_decoded)
         
         return torch.sigmoid(out_img)
 
-    def sp_decode(self, z):
+    def sbd_decode(self, z):
         batchsize = len(z)
         xy_tiled = torch.from_numpy(np.tile(self.xy, (batchsize, 1, 1, 1)).astype(np.float32)).to(self.device)
         
@@ -121,9 +121,9 @@ class VAE(nn.Module):
         z_and_xy = torch.cat((z_tiled, xy_tiled), dim=3)
         z_and_xy = z_and_xy.permute(0, 3, 2, 1)
 
-        sp_2_decoded = F.leaky_relu(self.sp_dec_2(z_and_xy))
-        sp_1_decoded = F.leaky_relu(self.sp_dec_1(sp_2_decoded))
-        out_img = self.sp_dec_0(sp_1_decoded)
+        sbd_2_decoded = F.leaky_relu(self.sbd_conv_2(z_and_xy))
+        sbd_1_decoded = F.leaky_relu(self.sbd_conv_1(sbd_2_decoded))
+        out_img = self.sbd_conv_0(sbd_1_decoded)
         
         return torch.sigmoid(out_img)
     
@@ -136,9 +136,9 @@ class VAE(nn.Module):
     def forward(self, x):
         z, mu, logvar = self.encode(x)    
         if self.sbd:
-            img_out = self.sp_decode(z)
+            img_out = self.sbd_decode(z)
         else:
-            img_out = self.decode(z)
+            img_out = self.deconv_decode(z)
         
         return img_out, mu, logvar 
     
